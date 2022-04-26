@@ -38,9 +38,9 @@ namespace CameraControl.windows
                     {
                         ((MultipleLiveViewViewModel)(DataContext)).InitCameras();
                         Owner = ServiceProvider.PluginManager.SelectedWindow as Window;
-                        Show();
-                        Activate();
-                        Focus();
+                        // Show();
+                        // Activate();
+                        // Focus();
                     }));
                     break;
                 case WindowsCmdConsts.MultipleLiveViewWnd_Hide:

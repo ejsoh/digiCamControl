@@ -1,4 +1,5 @@
 ﻿using System;
+
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -9,127 +10,78 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using CameraControl.Devices.Classes;
+using CameraControl.Core.Classes;
 using CameraControl.Devices.Wifi;
+using Timer = System.Timers.Timer;
 
 namespace CameraControl.Devices.Example
 {
+   
     public partial class Form1 : Form
     {
-
+        public ICameraDevice CameraDevice { get; set; }
+        public WebServer WebServer { get; set; }
         public CameraDeviceManager DeviceManager { get; set; }
         public string FolderForPhotos { get; set; }
+        private Timer _liveViewTimer = new Timer(500);
+        
 
-        public Form1()
+            
+
+            public Form1()
         {
-            DeviceManager = new CameraDeviceManager();
-            DeviceManager.CameraSelected += DeviceManager_CameraSelected;
-            DeviceManager.CameraConnected += DeviceManager_CameraConnected;
-            DeviceManager.PhotoCaptured += DeviceManager_PhotoCaptured;
-            DeviceManager.CameraDisconnected += DeviceManager_CameraDisconnected;
+            
+        DeviceManager = new CameraDeviceManager();
+            
+
+            //DeviceManager.CameraSelected += DeviceManager_CameraSelected;
             // For experimental Canon driver support- to use canon driver the canon sdk files should be copied in application folder
             DeviceManager.UseExperimentalDrivers = true;
             DeviceManager.DisableNativeDrivers = false;
+           
             FolderForPhotos = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Test");
-            InitializeComponent();
-            Log.LogError += Log_LogDebug;
-            Log.LogDebug += Log_LogDebug;
-            Log.LogInfo += Log_LogDebug;
-        }
-
-        void Log_LogDebug(LogEventArgs e)
-        {
-            MethodInvoker method = delegate
-                                     {
-                                         textBox1.AppendText((string)e.Message);
-                                         if (e.Exception != null)
-                                             textBox1.AppendText((string)e.Exception.StackTrace);
-                                         textBox1.AppendText(Environment.NewLine);
-                                     };
-            if (InvokeRequired)
-                BeginInvoke(method);
-            else
-                method.Invoke();
-        }
-
-        private void RefreshDisplay()
-        {
-            MethodInvoker method = delegate
+            DeviceManager.ConnectToCamera();
+            Console.WriteLine(DeviceManager.ConnectedDevices);
+            Thread.Sleep(100);
+            foreach (ICameraDevice cameraDevice in DeviceManager.ConnectedDevices)
             {
-                cmb_cameras.BeginUpdate();
-                cmb_cameras.Items.Clear();
-                foreach (ICameraDevice cameraDevice in DeviceManager.ConnectedDevices)
+                Console.WriteLine("here");
+                Console.WriteLine(cameraDevice);
+                Console.WriteLine(cameraDevice.DisplayName.Contains("Canon"));
+                if (cameraDevice.DisplayName.Contains("Canon"))
                 {
-                    cmb_cameras.Items.Add(cameraDevice);
+                    Console.WriteLine(DeviceManager.SelectedCameraDevice);
+                    DeviceManager.SelectedCameraDevice = cameraDevice;
+                    cameraDevice.StartLiveView();
+                    _liveViewTimer.Stop();
+                    _liveViewTimer.Elapsed += _liveViewTimer_Tick;
+                    _liveViewTimer.AutoReset = true;
+                    _liveViewTimer.Enabled = true;
+                    new Thread(StartLiveView).Start();
+                    //DeviceManager.SelectedCameraDevice = cameraDevice;
                 }
-                cmb_cameras.DisplayMember = "DeviceName";
-                cmb_cameras.SelectedItem = DeviceManager.SelectedCameraDevice;
-                DeviceManager.SelectedCameraDevice.CaptureInSdRam = true;
-                // check if camera support live view
-                btn_liveview.Enabled = DeviceManager.SelectedCameraDevice.GetCapability(CapabilityEnum.LiveView);
-                cmb_cameras.EndUpdate();
-            };
-
-            if (InvokeRequired)
-                BeginInvoke(method);
-            else
-                method.Invoke();
-        }
-
-        private void PhotoCaptured(object o)
-        {
-            PhotoCapturedEventArgs eventArgs = o as PhotoCapturedEventArgs;
-            if (eventArgs == null)
-                return;
-            try
-            {
-                string fileName = Path.Combine(FolderForPhotos, Path.GetFileName(eventArgs.FileName));
-                // if file exist try to generate a new filename to prevent file lost. 
-                // This useful when camera is set to record in ram the the all file names are same.
-                if (File.Exists(fileName))
-                    fileName =
-                      StaticHelper.GetUniqueFilename(
-                        Path.GetDirectoryName(fileName) + "\\" + Path.GetFileNameWithoutExtension(fileName) + "_", 0,
-                        Path.GetExtension(fileName));
-
-                // check the folder of filename, if not found create it
-                if (!Directory.Exists(Path.GetDirectoryName(fileName)))
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(fileName));
-                }
-                eventArgs.CameraDevice.TransferFile(eventArgs.Handle, fileName);
-                // the IsBusy may used internally, if file transfer is done should set to false  
-                eventArgs.CameraDevice.IsBusy = false;
-                img_photo.ImageLocation = fileName;
             }
-            catch (Exception exception)
-            {
-                eventArgs.CameraDevice.IsBusy = false;
-                MessageBox.Show("Error download photo from camera :\n" + exception.Message);
-            }
+           
+
+
+            DeviceManager.SelectedCameraDevice.CameraDisconnected += CameraDevice_CameraDisconnected;
+            
+            Console.WriteLine("\nPress the Enter key to exit the application...\n");
+            Console.WriteLine("The application started at {0:HH:mm:ss.fff}", DateTime.Now);
+            Console.ReadLine();
+            
+
+            Console.WriteLine("Terminating the application...");
+            
+
         }
 
-        void DeviceManager_CameraDisconnected(ICameraDevice cameraDevice)
-        {
-            RefreshDisplay();
-        }
-
-        void DeviceManager_PhotoCaptured(object sender, PhotoCapturedEventArgs eventArgs)
-        {
-            // to prevent UI freeze start the transfer process in a new thread
-            Thread thread = new Thread(PhotoCaptured);
-            thread.Start(eventArgs);
-        }
-
-        void DeviceManager_CameraConnected(ICameraDevice cameraDevice)
-        {
-            RefreshDisplay();
-        }
 
         void DeviceManager_CameraSelected(ICameraDevice oldcameraDevice, ICameraDevice newcameraDevice)
         {
             MethodInvoker method = delegate
             {
-                btn_liveview.Enabled = newcameraDevice.GetCapability(CapabilityEnum.LiveView);
+                newcameraDevice.GetCapability(CapabilityEnum.LiveView);
             };
             if (InvokeRequired)
                 BeginInvoke(method);
@@ -137,19 +89,62 @@ namespace CameraControl.Devices.Example
                 method.Invoke();
         }
 
-        private void Form1_Load(object sender, EventArgs e)
+
+
+        void CameraDevice_CameraDisconnected(object sender, DisconnectCameraEventArgs eventArgs)
         {
-            DeviceManager.ConnectToCamera();
-            RefreshDisplay();
+            MethodInvoker method = delegate
+            {
+                _liveViewTimer.Stop();
+                Thread.Sleep(100);
+                Close();
+            };
+            if (InvokeRequired)
+                BeginInvoke(method);
+            else
+                method.Invoke();
         }
 
-        private void btn_capture_Click(object sender, EventArgs e)
+        void _liveViewTimer_Tick(object sender, EventArgs e)
         {
-            Thread thread=new Thread(Capture);
-            thread.Start();
+          
+            LiveViewData liveViewData = null;
+            try
+            {
+                Console.WriteLine(DeviceManager.SelectedCameraDevice);
+                Console.WriteLine("selected");
+                liveViewData = DeviceManager.SelectedCameraDevice.GetLiveViewImage();
+                Console.WriteLine(liveViewData.ImageData);
+            }
+            catch (Exception)
+            {
+                return;
+            }
+
+            if (liveViewData == null || liveViewData.ImageData == null)
+            {
+                Console.WriteLine("null");
+                return;
+            }
+            try
+            {
+
+                Console.WriteLine("사진 만들어");
+                new Bitmap(new MemoryStream(liveViewData.ImageData,
+                                                                liveViewData.ImageDataPosition,
+                                                                liveViewData.ImageData.Length -
+                                                                liveViewData.ImageDataPosition)).Save("image.jpg", System.Drawing.Imaging.ImageFormat.Jpeg);
+
+            }
+            catch (Exception)
+            {
+
+            }
         }
 
-        private void Capture()
+
+
+        private void StartLiveView()
         {
             bool retry;
             do
@@ -157,15 +152,17 @@ namespace CameraControl.Devices.Example
                 retry = false;
                 try
                 {
-                    DeviceManager.SelectedCameraDevice.CapturePhoto();
+                    
+                    Console.WriteLine(DeviceManager.ConnectedDevices);
+                    Thread.Sleep(100);
+                    Console.WriteLine("라이브뷰");
+                    //DeviceManager.SelectedCameraDevice.StartLiveView();
                 }
                 catch (DeviceException exception)
                 {
-                    // if device is bussy retry after 100 miliseconds
-                    if (exception.ErrorCode == ErrorCodes.MTP_Device_Busy ||
-                        exception.ErrorCode == ErrorCodes.ERROR_BUSY)
+                    if (exception.ErrorCode == ErrorCodes.MTP_Device_Busy || exception.ErrorCode == ErrorCodes.ERROR_BUSY)
                     {
-                        // !!!!this may cause infinite loop
+                        // this may cause infinite loop
                         Thread.Sleep(100);
                         retry = true;
                     }
@@ -174,50 +171,29 @@ namespace CameraControl.Devices.Example
                         MessageBox.Show("Error occurred :" + exception.Message);
                     }
                 }
-                catch (Exception  ex)
-                {
-                    MessageBox.Show("Error occurred :" + ex.Message);
-                }
-   
+
             } while (retry);
-        }
-
-        private void cmb_cameras_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            DeviceManager.SelectedCameraDevice = (ICameraDevice)cmb_cameras.SelectedItem;
-        }
-
-        private void btn_liveview_Click(object sender, EventArgs e)
-        {
-            LiveViewForm form = new LiveViewForm(DeviceManager.SelectedCameraDevice);
-            form.ShowDialog();
-        }
-
-        private void btn_wifi_Click(object sender, EventArgs e)
-        {
-            try
+            Console.WriteLine("사진 만들어1");
+            MethodInvoker method = () => _liveViewTimer.Start();
+            if (InvokeRequired)
             {
-                IWifiDeviceProvider wifiDeviceProvider = new SonyProvider();
-                DeviceManager.AddDevice(wifiDeviceProvider.Connect("<Auto>"));
-            }
-            catch (Exception exception)
-            {
-                MessageBox.Show("Unable to connect to WiFi device " + exception.Message);
-            }
-        }
-
-        private void button1_Click(object sender, EventArgs e)
-        {
-            try
-            {
+                Console.WriteLine("사진 만들어트루");
+                BeginInvoke(method);
+                ///  _liveViewTimer_Tick();
+                /// _liveViewTimer.Start();
+                ///new Thread(StartLiveView).Start();
 
             }
-            catch (Exception exception)
-            {
-                MessageBox.Show("Unable to connect to WiFi device " + exception.Message);
-            }
-            IWifiDeviceProvider wifiDeviceProvider = new PtpIpProvider();
-            DeviceManager.AddDevice(wifiDeviceProvider.Connect("192.168.1.1"));
+            
+            else
+                method.Invoke();
+
         }
+
+        
+
+       
+
+
     }
 }
